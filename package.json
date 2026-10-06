@@ -1,0 +1,17 @@
+{
+  "name": "stock-trend-alert",
+  "version": "0.2.0",
+  "description": "주식 트렌드 알림 서비스 — 국내 종목 실시간 시세 · 지지/저항 분석 · 매수/매도 알림",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "iconv-lite": "^0.7.3"
+  }
+}

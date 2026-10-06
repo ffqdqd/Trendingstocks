@@ -1,0 +1,1539 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>주식 트렌드 알림 — 실시간 v0.2.0</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    [data-view] { display: none; }
+    [data-view].active { display: block; }
+    .nav-item.active { background: rgba(255, 122, 0, 0.1); color: #FF7A00; font-weight: 600; }
+    .fade-in { animation: fadeIn 0.15s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .slide-panel { transition: transform 0.25s ease-out; }
+    .slide-panel.hidden-panel { transform: translateX(100%); }
+    .skeleton { background: linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%); background-size:200% 100%; animation: shimmer 1.4s infinite; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .spinner { border: 2px solid rgba(255,122,0,0.15); border-top-color: #FF7A00; width: 20px; height: 20px; border-radius: 50%; animation: spin 0.7s linear infinite; display:inline-block; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#FF7A00', 50: '#FFF4E6', 100: '#FFE4C0', 500: '#FF7A00', 600: '#E86D00', 700: '#C55A00' },
+            success: { DEFAULT: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+            info:    { DEFAULT: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+            warning: { DEFAULT: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+            destructive: { DEFAULT: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<!-- ============ Header ============ -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-40">
+  <div class="max-w-[1600px] mx-auto flex items-center gap-6 px-6 h-16">
+    <a href="#dashboard" data-nav="dashboard" class="flex items-center gap-2">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold">📈</div>
+      <div class="font-bold text-lg">StockTrend</div>
+      <span class="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600">v0.2 · 실시간</span>
+    </a>
+
+    <div class="flex-1 max-w-2xl relative">
+      <div class="relative">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="globalSearch" type="text" placeholder="종목명 또는 6자리 종목코드로 검색 (예: 삼성전자, 005930)"
+               class="w-full pl-10 pr-4 h-10 rounded-lg border border-slate-200 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" />
+        <div id="suggestBox" class="hidden absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden fade-in max-h-96 overflow-y-auto z-50"></div>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <span id="marketTimeTag" class="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md">시장 데이터 로딩...</span>
+      <button class="relative w-10 h-10 rounded-lg hover:bg-slate-100 flex items-center justify-center" title="알림">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span id="alertBadge" class="hidden absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-brand-500 text-white text-[10px] font-bold flex items-center justify-center">0</span>
+      </button>
+      <div class="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-sm font-bold text-slate-600">정</div>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-[1600px] mx-auto flex">
+  <!-- ============ Sidebar ============ -->
+  <aside class="w-56 shrink-0 border-r border-slate-200 min-h-[calc(100vh-64px)] bg-white">
+    <nav class="p-3 space-y-1">
+      <a href="#dashboard" data-nav="dashboard" class="nav-item active flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-slate-100">
+        <span>🏠</span><span>대시보드</span>
+      </a>
+      <a href="#search" data-nav="search" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-slate-100">
+        <span>🔍</span><span>종목 검색</span>
+      </a>
+      <a href="#watchlist" data-nav="watchlist" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-slate-100">
+        <span>⭐</span><span>즐겨찾기</span>
+        <span id="watchlistNavCount" class="ml-auto text-xs bg-slate-100 px-1.5 py-0.5 rounded">0</span>
+      </a>
+      <a href="#alerts" data-nav="alerts" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-slate-100">
+        <span>🔔</span><span>알림 이력</span>
+      </a>
+      <a href="#news" data-nav="news" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-slate-100">
+        <span>📰</span><span>뉴스·공시</span>
+      </a>
+      <a href="#hot" data-nav="hot" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-slate-100">
+        <span>🔥</span><span>핫 키워드</span>
+      </a>
+      <a href="#settings" data-nav="settings" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm hover:bg-slate-100">
+        <span>⚙️</span><span>설정</span>
+      </a>
+    </nav>
+
+    <div class="p-3 mt-4 border-t border-slate-100">
+      <div class="text-[11px] text-slate-500 uppercase font-semibold mb-2 px-3">최근 조회</div>
+      <div id="recentStocks"></div>
+    </div>
+  </aside>
+
+  <!-- ============ Main Views ============ -->
+  <main class="flex-1 p-8">
+
+    <!-- ============ View: Dashboard ============ -->
+    <div data-view="dashboard" class="active">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold">대시보드</h1>
+          <p id="todayDate" class="text-sm text-slate-500 mt-1"></p>
+        </div>
+        <button id="refreshBtn" class="px-3 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 flex items-center gap-2">
+          <span>🔄</span><span>새로고침</span>
+        </button>
+      </div>
+
+      <div id="alertPermBanner" class="hidden mb-4 flex items-center gap-3 p-3 bg-info-bg border border-info-border rounded-lg text-info-DEFAULT text-sm">
+        <span>🔔</span>
+        <span class="flex-1">브라우저 알림을 허용하면 매수·매도 타이밍을 놓치지 않아요.</span>
+        <button id="permAllowBtn" class="px-3 py-1.5 bg-info-DEFAULT text-white rounded-md text-xs font-semibold">허용하기</button>
+        <button id="permDismissBtn" class="text-info-DEFAULT/60 hover:text-info-DEFAULT text-xs">닫기</button>
+      </div>
+
+      <!-- Market summary (real) -->
+      <div class="grid grid-cols-3 gap-4 mb-6">
+        <div id="kospiCard" class="bg-white p-4 rounded-xl border border-slate-200">
+          <div class="text-xs text-slate-500">KOSPI</div>
+          <div class="skeleton h-8 mt-2 rounded"></div>
+        </div>
+        <div id="kosdaqCard" class="bg-white p-4 rounded-xl border border-slate-200">
+          <div class="text-xs text-slate-500">KOSDAQ</div>
+          <div class="skeleton h-8 mt-2 rounded"></div>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200">
+          <div class="text-xs text-slate-500">거래 시간</div>
+          <div id="marketStatus" class="text-2xl font-bold tabular-nums mt-1">확인 중...</div>
+        </div>
+      </div>
+
+      <!-- Watchlist mini grid -->
+      <section class="mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">⭐ 내 즐겨찾기</h2>
+          <a href="#watchlist" data-nav="watchlist" class="text-sm text-brand-500 hover:underline">전체 보기 →</a>
+        </div>
+        <div id="watchlistMiniGrid" class="grid grid-cols-3 gap-3">
+          <div class="skeleton h-24 rounded-xl"></div>
+          <div class="skeleton h-24 rounded-xl"></div>
+          <div class="skeleton h-24 rounded-xl"></div>
+        </div>
+      </section>
+
+      <!-- Two cols: 오늘의 알림 + 즐겨찾기 뉴스 -->
+      <div class="grid grid-cols-2 gap-4 mb-8">
+        <section class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">🔔 오늘의 알림</h2>
+            <a href="#alerts" data-nav="alerts" class="text-sm text-brand-500 hover:underline">전체 →</a>
+          </div>
+          <div id="todayAlerts" class="space-y-2 text-sm"></div>
+        </section>
+        <section class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">📰 즐겨찾기 뉴스</h2>
+            <a href="#news" data-nav="news" class="text-sm text-brand-500 hover:underline">전체 →</a>
+          </div>
+          <div id="watchlistNewsBox" class="space-y-2 text-sm"></div>
+        </section>
+      </div>
+
+      <!-- 시장 상승/하락 TOP -->
+      <div class="grid grid-cols-2 gap-4">
+        <section class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">📈 오늘의 상승 TOP</h2>
+          </div>
+          <div id="gainersBox" class="space-y-1 text-sm"></div>
+        </section>
+        <section class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">📉 오늘의 하락 TOP</h2>
+          </div>
+          <div id="losersBox" class="space-y-1 text-sm"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ============ View: Search ============ -->
+    <div data-view="search">
+      <h1 class="text-2xl font-bold mb-6">종목 검색</h1>
+      <div class="max-w-2xl mx-auto mt-8">
+        <div class="relative mb-6">
+          <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+          <input id="pageSearch" type="text" placeholder="종목명 또는 6자리 종목코드"
+                 class="w-full pl-14 pr-4 h-14 text-lg rounded-xl border-2 border-slate-200 focus:border-brand-500 focus:outline-none" />
+        </div>
+        <div id="pageSearchResult" class="space-y-1"></div>
+
+        <div class="mt-8">
+          <div class="text-sm font-semibold text-slate-500 mb-2">🔥 오늘의 상승률 TOP</div>
+          <div id="searchGainers" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ View: Stock Detail ============ -->
+    <div data-view="stock">
+      <div class="mb-4">
+        <button data-nav="watchlist" class="text-sm text-slate-500 hover:text-brand-500">← 즐겨찾기로 돌아가기</button>
+      </div>
+
+      <div id="stockLoader" class="text-center py-24">
+        <span class="spinner"></span>
+        <div class="text-sm text-slate-500 mt-3">실시간 시세를 불러오는 중...</div>
+      </div>
+
+      <div id="stockContent" class="hidden">
+        <!-- Header card -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-4">
+          <div class="flex items-start justify-between">
+            <div class="flex items-start gap-4">
+              <div class="w-14 h-14 rounded-xl bg-gradient-to-br from-brand-100 to-brand-500 flex items-center justify-center text-2xl">📈</div>
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h1 id="stockName" class="text-2xl font-bold"></h1>
+                  <span id="stockCode" class="text-sm text-slate-500"></span>
+                  <span id="stockMarketTag" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded"></span>
+                  <span id="stockSectorTag" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded"></span>
+                </div>
+                <div class="flex items-baseline gap-3 mt-2">
+                  <div id="stockPrice" class="text-4xl font-bold tabular-nums"></div>
+                  <div class="text-slate-500 text-sm">원</div>
+                  <div id="stockChange" class="font-semibold text-lg"></div>
+                </div>
+                <div id="stockMeta" class="text-sm text-slate-500 mt-1 tabular-nums"></div>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button id="favoriteBtn" class="px-4 py-2 border border-brand-500 text-brand-500 rounded-lg hover:bg-brand-50 font-semibold text-sm flex items-center gap-2">
+                <span id="favIcon">☆</span><span id="favLabel">즐겨찾기</span>
+              </button>
+              <button id="alertBtn" class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-semibold text-sm flex items-center gap-2">
+                <span>🔔</span><span>알림 설정</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-4 flex items-center gap-3 p-3 bg-warning-bg border border-warning-border rounded-lg text-warning-DEFAULT text-sm">
+          <span>⚠️</span>
+          <span>본 리포트는 규칙 기반 기술적 분석입니다. 투자 판단은 본인 책임이며, 어떠한 수익도 보장하지 않습니다. · 데이터: Yahoo Finance <span id="dataTimestamp"></span></span>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+          <div class="col-span-2 space-y-4">
+            <!-- 다이어그램 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6">
+              <h3 class="text-lg font-semibold mb-4">📊 주요 가격대 (실시간 분석)</h3>
+              <div id="priceDiagram" class="space-y-3"></div>
+            </div>
+
+            <!-- 코멘트 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6">
+              <h3 class="text-lg font-semibold mb-4">💬 가격대별 코멘트</h3>
+              <div id="commentBox" class="space-y-4 text-sm"></div>
+            </div>
+
+            <!-- 차트 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">📉 최근 6개월 추이</h3>
+                <div class="flex gap-3 text-xs">
+                  <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-brand-500"></span>종가</span>
+                  <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-blue-500"></span>저항</span>
+                  <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-amber-500"></span>지지</span>
+                  <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-red-500"></span>손절</span>
+                </div>
+              </div>
+              <div class="relative" style="height: 220px;">
+                <canvas id="priceChart"></canvas>
+              </div>
+            </div>
+
+            <!-- 뉴스 -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-6">
+              <h3 class="text-lg font-semibold mb-4">📰 종목 뉴스</h3>
+              <div id="stockNewsBox" class="space-y-2 text-sm"></div>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div class="bg-white rounded-2xl border border-slate-200 p-5">
+              <h3 class="text-base font-semibold mb-3">📋 대응 가이드</h3>
+              <ul id="guideBox" class="space-y-3 text-sm"></ul>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-semibold">🔔 활성 알림</h3>
+                <button data-open-alert-panel class="text-xs text-brand-500 hover:underline">편집</button>
+              </div>
+              <div id="activeAlertBox" class="space-y-2"></div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-slate-200 p-5">
+              <h3 class="text-base font-semibold mb-3">📅 52주 범위</h3>
+              <div id="range52Box" class="text-sm space-y-2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ View: Watchlist ============ -->
+    <div data-view="watchlist">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold">⭐ 즐겨찾기</h1>
+          <p class="text-sm text-slate-500 mt-1">내가 보유·관심 종목의 실시간 현황</p>
+        </div>
+        <button data-nav="search" class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-semibold text-sm">+ 종목 추가</button>
+      </div>
+
+      <div id="watchlistStats" class="grid grid-cols-4 gap-3 mb-4"></div>
+
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">종목</th>
+              <th class="text-right px-4 py-3 font-medium">현재가</th>
+              <th class="text-right px-4 py-3 font-medium">등락률</th>
+              <th class="text-right px-4 py-3 font-medium">지지선</th>
+              <th class="text-right px-4 py-3 font-medium">저항선</th>
+              <th class="text-left px-4 py-3 font-medium">현재 위치</th>
+              <th class="text-center px-4 py-3 font-medium">알림</th>
+              <th class="text-right px-4 py-3 font-medium">액션</th>
+            </tr>
+          </thead>
+          <tbody id="watchlistTable" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+
+      <div id="watchlistEmpty" class="hidden text-center py-20 bg-white rounded-xl border border-dashed border-slate-300">
+        <div class="text-5xl mb-3">⭐</div>
+        <div class="font-semibold text-lg">아직 즐겨찾기한 종목이 없어요</div>
+        <div class="text-sm text-slate-500 mt-1 mb-4">관심 종목을 검색해서 ⭐ 를 눌러보세요</div>
+        <button data-nav="search" class="px-5 py-2.5 bg-brand-500 text-white rounded-lg font-semibold">종목 검색으로 이동</button>
+      </div>
+    </div>
+
+    <!-- ============ View: Alert History ============ -->
+    <div data-view="alerts">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold">🔔 알림 이력</h1>
+          <p class="text-sm text-slate-500 mt-1">지지·저항선 이탈/돌파 감지 이력</p>
+        </div>
+        <div class="flex gap-2">
+          <button id="markAllRead" class="px-3 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">✓ 전체 읽음</button>
+          <button id="clearOld" class="px-3 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">🗑️ 30일 이전 정리</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">시각</th>
+              <th class="text-left px-4 py-3 font-medium">유형</th>
+              <th class="text-left px-4 py-3 font-medium">종목</th>
+              <th class="text-right px-4 py-3 font-medium">트리거 가격</th>
+              <th class="text-left px-4 py-3 font-medium">조건</th>
+              <th class="text-center px-4 py-3 font-medium">상태</th>
+            </tr>
+          </thead>
+          <tbody id="alertTable" class="divide-y divide-slate-100"></tbody>
+        </table>
+        <div id="alertEmpty" class="hidden text-center py-16 text-slate-500 text-sm">
+          아직 발송된 알림이 없습니다. 즐겨찾기 종목의 지지선·저항선을 벗어나면 여기에 기록됩니다.
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ View: News ============ -->
+    <div data-view="news">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold">📰 뉴스·공시</h1>
+          <p class="text-sm text-slate-500 mt-1">즐겨찾기 종목 관련 최신 뉴스</p>
+        </div>
+        <button id="refreshNewsBtn" class="px-3 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">🔄 새로고침</button>
+      </div>
+      <div id="newsList" class="space-y-2"></div>
+    </div>
+
+    <!-- ============ View: Hot Keywords ============ -->
+    <div data-view="hot">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold">🔥 핫 키워드</h1>
+          <p class="text-sm text-slate-500 mt-1">오늘 시장을 움직이는 테마·이슈</p>
+        </div>
+      </div>
+      <div id="hotGrid" class="grid grid-cols-2 gap-4"></div>
+    </div>
+
+    <!-- ============ View: Settings ============ -->
+    <div data-view="settings">
+      <h1 class="text-2xl font-bold mb-6">⚙️ 설정</h1>
+
+      <div class="max-w-3xl space-y-6">
+        <section class="bg-white rounded-xl border border-slate-200 p-6">
+          <h2 class="text-lg font-semibold mb-4">🔔 알림 채널</h2>
+          <div class="space-y-3">
+            <label class="flex items-center justify-between p-3 border border-slate-200 rounded-lg">
+              <div>
+                <div class="font-medium">브라우저 알림</div>
+                <div class="text-sm text-slate-500">지지·저항선 이탈/돌파 감지 시 즉시 알림</div>
+              </div>
+              <div class="flex items-center gap-3">
+                <span id="permStatusTag" class="text-xs px-2 py-1 rounded"></span>
+                <button id="requestPermBtn" class="text-xs px-3 py-1 bg-brand-500 text-white rounded-md">권한 요청</button>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <section class="bg-white rounded-xl border border-slate-200 p-6">
+          <h2 class="text-lg font-semibold mb-4">💾 데이터 관리</h2>
+          <div class="space-y-2">
+            <button id="resetDefaultBtn" class="w-full text-left p-3 border border-slate-200 rounded-lg hover:bg-slate-50 text-sm">
+              🔄 즐겨찾기 기본값(삼성전자·SK하이닉스 등 5종)으로 복원
+            </button>
+            <button id="clearAllBtn" class="w-full text-left p-3 border border-destructive-border text-destructive-DEFAULT rounded-lg hover:bg-destructive-bg text-sm">
+              ⚠️ 모든 데이터 삭제 (즐겨찾기 + 알림 이력)
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Alert Setting Slide Panel -->
+<div id="alertPanel" class="slide-panel hidden-panel fixed top-0 right-0 h-full w-[420px] bg-white shadow-2xl border-l border-slate-200 z-50 flex flex-col">
+  <div class="flex items-center justify-between p-5 border-b border-slate-200">
+    <div>
+      <h3 class="text-lg font-semibold">🔔 알림 설정</h3>
+      <p class="text-xs text-slate-500 mt-0.5"><span id="panelStockName"></span>의 매수·매도 조건</p>
+    </div>
+    <button data-close-alert-panel class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center">✕</button>
+  </div>
+
+  <div class="flex-1 overflow-y-auto p-5 space-y-4">
+    <div class="p-3 bg-info-bg border border-info-border rounded-lg text-info-DEFAULT text-xs">
+      💡 조건 만족 시 브라우저 알림으로 발송됩니다. 같은 조건은 24시간 쿨다운.
+    </div>
+
+    <div id="alertRulesForm" class="space-y-4"></div>
+  </div>
+
+  <div class="p-5 border-t border-slate-200 flex gap-2">
+    <button data-close-alert-panel class="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-sm">취소</button>
+    <button data-save-alert class="flex-1 px-4 py-2.5 bg-brand-500 text-white rounded-lg text-sm font-semibold hover:bg-brand-600">저장</button>
+  </div>
+</div>
+
+<div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 px-5 py-3 bg-slate-900 text-white rounded-lg text-sm shadow-2xl opacity-0 transition-opacity z-50 pointer-events-none">
+  저장되었습니다
+</div>
+
+<script>
+// ==================== State ====================
+const DEFAULT_WATCHLIST = ['005930', '000660', '035420', '035720', '373220']; // 삼성전자, SK하이닉스, NAVER, 카카오, LG에너지솔루션
+const LS_WATCHLIST = 'stocktrend_watchlist_v2';
+const LS_ALERTS = 'stocktrend_alerts_v2';
+const LS_RULES = 'stocktrend_alert_rules_v2';
+const LS_RECENT = 'stocktrend_recent_v2';
+
+const state = {
+  watchlist: [],       // [code]
+  quotes: {},          // code → quote object
+  alertHistory: [],    // [{time, type, code, name, price, condition, read}]
+  alertRules: {},      // code → { buy, sell, stopLoss, target }
+  recentViewed: [],    // [code]
+  currentStockCode: null,
+  currentStock: null,
+};
+
+function loadState() {
+  try { state.watchlist = JSON.parse(localStorage.getItem(LS_WATCHLIST) || 'null') || [...DEFAULT_WATCHLIST]; }
+  catch { state.watchlist = [...DEFAULT_WATCHLIST]; }
+  try { state.alertHistory = JSON.parse(localStorage.getItem(LS_ALERTS) || '[]'); } catch { state.alertHistory = []; }
+  try { state.alertRules = JSON.parse(localStorage.getItem(LS_RULES) || '{}'); } catch { state.alertRules = {}; }
+  try { state.recentViewed = JSON.parse(localStorage.getItem(LS_RECENT) || '[]'); } catch { state.recentViewed = []; }
+}
+function saveWatchlist() { localStorage.setItem(LS_WATCHLIST, JSON.stringify(state.watchlist)); }
+function saveAlerts() { localStorage.setItem(LS_ALERTS, JSON.stringify(state.alertHistory)); }
+function saveRules() { localStorage.setItem(LS_RULES, JSON.stringify(state.alertRules)); }
+function saveRecent() { localStorage.setItem(LS_RECENT, JSON.stringify(state.recentViewed.slice(0, 8))); }
+
+// ==================== API ====================
+const api = {
+  async indices() { return (await fetch('/api/indices')).json(); },
+  async search(q) { return (await fetch('/api/search?q=' + encodeURIComponent(q))).json(); },
+  async stock(code) { return (await fetch('/api/stock/' + code)).json(); },
+  async stockNews(code) { return (await fetch('/api/stock/' + code + '/news')).json(); },
+  async movers() { return (await fetch('/api/market/movers')).json(); },
+  async hotKeywords() { return (await fetch('/api/hot-keywords')).json(); },
+  async watchlistQuotes(codes) {
+    return (await fetch('/api/watchlist/quotes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes }) })).json();
+  },
+  async watchlistNews(codes) {
+    return (await fetch('/api/watchlist/news', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes }) })).json();
+  },
+};
+
+const fmt = (n) => Math.round(Number(n) || 0).toLocaleString('ko-KR');
+const fmtF = (n, d = 2) => Number(n || 0).toFixed(d);
+const timeAgo = (dateStr) => {
+  const t = new Date(dateStr);
+  if (isNaN(t)) return '';
+  const diff = (Date.now() - t) / 1000;
+  if (diff < 60) return '방금';
+  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+  return `${Math.floor(diff / 86400)}일 전`;
+};
+
+// ==================== Navigation ====================
+function activateView(name) {
+  document.querySelectorAll('[data-view]').forEach(el => el.classList.remove('active'));
+  const target = document.querySelector(`[data-view="${name}"]`);
+  if (target) target.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const nav = document.querySelector(`.nav-item[data-nav="${name}"]`);
+  if (nav) nav.classList.add('active');
+  window.scrollTo(0, 0);
+
+  if (name === 'watchlist') renderWatchlistFull();
+  if (name === 'alerts') renderAlerts();
+  if (name === 'news') renderNewsPage();
+  if (name === 'hot') renderHotPage();
+  if (name === 'settings') renderSettingsPage();
+}
+
+document.addEventListener('click', (e) => {
+  const nav = e.target.closest('[data-nav]');
+  if (nav) { e.preventDefault(); activateView(nav.dataset.nav); return; }
+  const stock = e.target.closest('[data-stock]');
+  if (stock) { e.preventDefault(); loadStock(stock.dataset.stock); activateView('stock'); }
+});
+
+// ==================== Dashboard ====================
+async function renderDashboard() {
+  document.getElementById('todayDate').textContent =
+    new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+
+  // Notification permission banner
+  if ('Notification' in window && Notification.permission === 'default') {
+    document.getElementById('alertPermBanner').classList.remove('hidden');
+    document.getElementById('alertPermBanner').classList.add('flex');
+  }
+
+  // Indices
+  try {
+    const { kospi, kosdaq } = await api.indices();
+    renderIndexCard('kospiCard', 'KOSPI', kospi);
+    renderIndexCard('kosdaqCard', 'KOSDAQ', kosdaq);
+    const t = kospi?.marketTime ? new Date(kospi.marketTime) : new Date();
+    document.getElementById('marketStatus').textContent =
+      t.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + ' 기준';
+    document.getElementById('marketTimeTag').textContent =
+      isMarketOpen(t) ? '🟢 장중' : '🔴 장 마감 · 종가 기준';
+  } catch (e) {
+    document.getElementById('kospiCard').innerHTML = `<div class="text-xs text-slate-500">KOSPI</div><div class="text-destructive-DEFAULT text-sm mt-2">데이터 로드 실패</div>`;
+    document.getElementById('kosdaqCard').innerHTML = `<div class="text-xs text-slate-500">KOSDAQ</div><div class="text-destructive-DEFAULT text-sm mt-2">데이터 로드 실패</div>`;
+  }
+
+  // Watchlist quotes (mini grid) + news + evaluate alerts
+  await refreshWatchlist();
+  renderMiniGrid();
+  renderTodayAlerts();
+  renderWatchlistNewsBox();
+  renderMoversBox();
+}
+
+function isMarketOpen(t) {
+  const h = t.getHours(), m = t.getMinutes();
+  const now = h * 60 + m;
+  const day = t.getDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+  return now >= 9 * 60 && now <= 15 * 60 + 30;
+}
+
+function renderIndexCard(id, label, data) {
+  if (!data) { document.getElementById(id).innerHTML = `<div class="text-xs text-slate-500">${label}</div><div class="text-destructive-DEFAULT text-sm mt-2">데이터 없음</div>`; return; }
+  const up = data.changePct >= 0;
+  document.getElementById(id).innerHTML = `
+    <div class="text-xs text-slate-500">${label}</div>
+    <div class="flex items-baseline gap-2 mt-1">
+      <div class="text-2xl font-bold tabular-nums">${fmtF(data.price)}</div>
+      <div class="${up ? 'text-success-DEFAULT' : 'text-destructive-DEFAULT'} text-sm font-semibold">${up ? '▲' : '▼'} ${Math.abs(data.changePct).toFixed(2)}%</div>
+    </div>
+    <div class="text-xs text-slate-400 mt-1 tabular-nums">${up ? '+' : ''}${fmtF(data.change)}</div>
+  `;
+}
+
+async function refreshWatchlist() {
+  if (!state.watchlist.length) return;
+  try {
+    const { items } = await api.watchlistQuotes(state.watchlist);
+    items.forEach(q => { if (!q.error) state.quotes[q.code] = q; });
+    evaluateAlerts(items);
+  } catch (e) { console.error('watchlist quotes', e); }
+  document.getElementById('watchlistNavCount').textContent = state.watchlist.length;
+}
+
+function evaluateAlerts(items) {
+  const now = Date.now();
+  items.forEach(q => {
+    if (q.error) return;
+    const rules = state.alertRules[q.code] || defaultRules(q);
+    const fires = [];
+    if (rules.buy?.enabled && q.price >= rules.buy.price && (rules.buy.lastFiredAt || 0) < now - 86400000) {
+      fires.push({ type: 'BUY', label: '🟢 매수', condition: `${fmt(rules.buy.price)}원 돌파` });
+      rules.buy.lastFiredAt = now;
+    }
+    if (rules.sell?.enabled && q.price <= rules.sell.price && (rules.sell.lastFiredAt || 0) < now - 86400000) {
+      fires.push({ type: 'SELL', label: '🔴 매도', condition: `지지선 ${fmt(rules.sell.price)}원 이탈` });
+      rules.sell.lastFiredAt = now;
+    }
+    if (rules.stopLoss?.enabled && q.price <= rules.stopLoss.price && (rules.stopLoss.lastFiredAt || 0) < now - 86400000) {
+      fires.push({ type: 'STOP_LOSS', label: '⛔ 손절', condition: `손절선 ${fmt(rules.stopLoss.price)}원 이탈` });
+      rules.stopLoss.lastFiredAt = now;
+    }
+    if (rules.target?.enabled && q.price >= rules.target.price && (rules.target.lastFiredAt || 0) < now - 86400000) {
+      fires.push({ type: 'TARGET', label: '🎯 목표', condition: `1차 목표가 ${fmt(rules.target.price)}원 달성` });
+      rules.target.lastFiredAt = now;
+    }
+    fires.forEach(f => {
+      state.alertHistory.unshift({
+        time: new Date().toISOString(),
+        type: f.type, typeLabel: f.label,
+        code: q.code, name: q.name,
+        price: q.price, condition: f.condition, read: false,
+      });
+      // Browser notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(`${f.label} · ${q.name}`, { body: `${fmt(q.price)}원 · ${f.condition}` });
+      }
+    });
+    state.alertRules[q.code] = rules;
+  });
+  saveRules();
+  saveAlerts();
+  const unread = state.alertHistory.filter(a => !a.read).length;
+  const badge = document.getElementById('alertBadge');
+  if (unread > 0) { badge.classList.remove('hidden'); badge.textContent = unread; }
+  else badge.classList.add('hidden');
+}
+
+function defaultRules(q) {
+  return {
+    buy:      { enabled: true,  price: q.resistance.high, lastFiredAt: 0 },
+    sell:     { enabled: true,  price: q.support.low,     lastFiredAt: 0 },
+    stopLoss: { enabled: false, price: q.stopLoss,        lastFiredAt: 0 },
+    target:   { enabled: false, price: q.target1,         lastFiredAt: 0 },
+  };
+}
+
+function renderMiniGrid() {
+  const grid = document.getElementById('watchlistMiniGrid');
+  if (!state.watchlist.length) {
+    grid.innerHTML = `<div class="col-span-3 text-center py-10 bg-white rounded-xl border border-dashed border-slate-300"><div class="text-3xl mb-2">⭐</div><div class="text-sm text-slate-500">관심 종목을 등록해보세요</div></div>`;
+    return;
+  }
+  grid.innerHTML = state.watchlist.slice(0, 6).map(code => {
+    const q = state.quotes[code];
+    if (!q) return `<div class="skeleton h-24 rounded-xl"></div>`;
+    const up = q.changePct >= 0;
+    const nearSupport = q.price <= q.support.high * 1.02;
+    const nearResistance = q.price >= q.resistance.low * 0.98;
+    const badge = nearSupport
+      ? '<span class="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded">🛡️ 지지 근접</span>'
+      : nearResistance
+      ? '<span class="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded">🚧 저항 근접</span>'
+      : '';
+    return `
+      <a href="#" data-stock="${q.code}" class="p-4 bg-white border border-slate-200 rounded-xl hover:border-brand-500 transition-colors">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <div class="font-semibold">${q.name}</div>
+            <div class="text-[10px] text-slate-400">${q.code} · ${q.market}</div>
+          </div>
+          ${badge}
+        </div>
+        <div class="flex items-baseline gap-2">
+          <div class="text-xl font-bold tabular-nums">${fmt(q.price)}</div>
+          <div class="text-xs ${up ? 'text-success-DEFAULT' : 'text-destructive-DEFAULT'}">${up ? '▲' : '▼'} ${Math.abs(q.changePct).toFixed(2)}%</div>
+        </div>
+        <div class="text-xs text-slate-400 mt-2 tabular-nums">
+          지지 ${fmt(q.support.low)} · 저항 ${fmt(q.resistance.high)}
+        </div>
+      </a>
+    `;
+  }).join('');
+}
+
+function renderTodayAlerts() {
+  const box = document.getElementById('todayAlerts');
+  const today = state.alertHistory.slice(0, 3);
+  if (!today.length) {
+    box.innerHTML = `<div class="text-sm text-slate-400 text-center py-6">조용한 하루입니다. 모니터링 중 ...</div>`;
+    return;
+  }
+  box.innerHTML = today.map(a => {
+    const color = a.type === 'BUY' ? 'success' : a.type === 'SELL' ? 'destructive' : a.type === 'STOP_LOSS' ? 'destructive' : 'warning';
+    return `
+      <a href="#" data-stock="${a.code}" class="block p-3 bg-${color}-bg border border-${color}-border rounded-lg hover:opacity-90">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold text-${color}-DEFAULT bg-white px-2 py-0.5 rounded">${a.typeLabel}</span>
+          <span class="ml-auto text-xs text-slate-500">${timeAgo(a.time)}</span>
+        </div>
+        <div class="mt-1"><strong>${a.name}</strong> · ${a.condition}</div>
+      </a>
+    `;
+  }).join('');
+}
+
+async function renderWatchlistNewsBox() {
+  const box = document.getElementById('watchlistNewsBox');
+  if (!state.watchlist.length) { box.innerHTML = `<div class="text-sm text-slate-400 text-center py-6">즐겨찾기 종목이 없습니다</div>`; return; }
+  box.innerHTML = `<div class="text-sm text-slate-400 text-center py-3"><span class="spinner"></span></div>`;
+  try {
+    const { items } = await api.watchlistNews(state.watchlist);
+    if (!items.length) { box.innerHTML = `<div class="text-sm text-slate-400 text-center py-6">최근 뉴스 없음</div>`; return; }
+    box.innerHTML = items.slice(0, 5).map(n => `
+      <a href="${n.link}" target="_blank" rel="noopener" class="block p-2 rounded hover:bg-slate-50">
+        <div class="flex items-start gap-2">
+          <span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0 mt-0.5">${n.stockName}</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm truncate">${n.title}</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">${n.source} · ${timeAgo(n.pubDate)}</div>
+          </div>
+        </div>
+      </a>
+    `).join('');
+  } catch { box.innerHTML = `<div class="text-sm text-destructive-DEFAULT text-center py-6">뉴스 로드 실패</div>`; }
+}
+
+async function renderMoversBox() {
+  const g = document.getElementById('gainersBox');
+  const l = document.getElementById('losersBox');
+  g.innerHTML = l.innerHTML = `<div class="text-center py-3"><span class="spinner"></span></div>`;
+  try {
+    const { gainers, losers } = await api.movers();
+    g.innerHTML = gainers.slice(0, 5).map(s => `
+      <a href="#" data-stock="${s.code}" class="flex items-center justify-between p-2 rounded hover:bg-slate-50">
+        <div>
+          <div class="font-medium">${s.name}</div>
+          <div class="text-[10px] text-slate-400">${s.sector}</div>
+        </div>
+        <div class="text-right tabular-nums">
+          <div class="text-sm">${fmt(s.price)}</div>
+          <div class="text-xs text-success-DEFAULT">▲ ${s.changePct.toFixed(2)}%</div>
+        </div>
+      </a>
+    `).join('');
+    l.innerHTML = losers.slice(0, 5).map(s => `
+      <a href="#" data-stock="${s.code}" class="flex items-center justify-between p-2 rounded hover:bg-slate-50">
+        <div>
+          <div class="font-medium">${s.name}</div>
+          <div class="text-[10px] text-slate-400">${s.sector}</div>
+        </div>
+        <div class="text-right tabular-nums">
+          <div class="text-sm">${fmt(s.price)}</div>
+          <div class="text-xs text-destructive-DEFAULT">▼ ${Math.abs(s.changePct).toFixed(2)}%</div>
+        </div>
+      </a>
+    `).join('');
+    // also seed search page gainers
+    document.getElementById('searchGainers').innerHTML = gainers.slice(0, 8).map(s => `
+      <button data-stock="${s.code}" class="px-3 py-1.5 bg-white border border-slate-200 rounded-full text-sm hover:border-brand-500">
+        ${s.name} ▲ ${s.changePct.toFixed(2)}%
+      </button>
+    `).join('');
+  } catch { g.innerHTML = l.innerHTML = `<div class="text-sm text-destructive-DEFAULT">로드 실패</div>`; }
+}
+
+// ==================== Search ====================
+async function performSuggest(q, boxId) {
+  const box = document.getElementById(boxId);
+  if (!q || q.length < 1) { box.classList.add('hidden'); return; }
+  try {
+    const { results } = await api.search(q);
+    if (!results.length) {
+      box.innerHTML = `<div class="p-4 text-sm text-slate-500 text-center">해당 종목을 찾을 수 없습니다. (지원 종목: 국내 상위 ~120개)</div>`;
+    } else {
+      box.innerHTML = results.map(s => `
+        <a href="#" data-stock="${s.code}" class="flex items-center justify-between p-3 hover:bg-slate-50 border-b border-slate-100 last:border-b-0">
+          <div>
+            <div class="font-medium">${s.name}</div>
+            <div class="text-xs text-slate-500">${s.code} · ${s.market} · ${s.sector}</div>
+          </div>
+        </a>
+      `).join('');
+    }
+    box.classList.remove('hidden');
+  } catch { box.classList.add('hidden'); }
+}
+
+let searchTimer;
+document.getElementById('globalSearch').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => performSuggest(e.target.value.trim(), 'suggestBox'), 150);
+});
+document.getElementById('globalSearch').addEventListener('focus', (e) => {
+  if (e.target.value.trim()) performSuggest(e.target.value.trim(), 'suggestBox');
+});
+document.getElementById('globalSearch').addEventListener('blur', () => {
+  setTimeout(() => document.getElementById('suggestBox').classList.add('hidden'), 200);
+});
+
+document.getElementById('pageSearch').addEventListener('input', async (e) => {
+  const box = document.getElementById('pageSearchResult');
+  const q = e.target.value.trim();
+  if (!q) { box.innerHTML = ''; return; }
+  const { results } = await api.search(q);
+  if (!results.length) {
+    box.innerHTML = `<div class="p-6 text-center text-sm text-slate-500 bg-white rounded-lg border border-dashed border-slate-300">종목을 찾을 수 없습니다.</div>`;
+    return;
+  }
+  box.innerHTML = results.map(s => `
+    <a href="#" data-stock="${s.code}" class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:border-brand-500">
+      <div>
+        <div class="font-semibold">${s.name}</div>
+        <div class="text-xs text-slate-500">${s.code} · ${s.market} · ${s.sector}</div>
+      </div>
+      <svg class="w-5 h-5 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+    </a>
+  `).join('');
+});
+
+// ==================== Stock Detail ====================
+async function loadStock(code) {
+  state.currentStockCode = code;
+  document.getElementById('stockLoader').style.display = 'block';
+  document.getElementById('stockContent').classList.add('hidden');
+  try {
+    const s = await api.stock(code);
+    if (s.error) throw new Error(s.error);
+    state.currentStock = s;
+    renderStockDetail(s);
+    // Add to recent
+    state.recentViewed = [code, ...state.recentViewed.filter(c => c !== code)].slice(0, 8);
+    saveRecent();
+    renderSidebarRecent();
+    // Load news async
+    loadStockNews(code);
+  } catch (e) {
+    document.getElementById('stockLoader').innerHTML = `<div class="text-destructive-DEFAULT">시세 로드 실패: ${e.message}</div>`;
+  }
+}
+
+function renderStockDetail(s) {
+  document.getElementById('stockLoader').style.display = 'none';
+  document.getElementById('stockContent').classList.remove('hidden');
+
+  document.getElementById('stockName').textContent = s.name;
+  document.getElementById('stockCode').textContent = s.code;
+  document.getElementById('stockMarketTag').textContent = s.market;
+  document.getElementById('stockSectorTag').textContent = s.sector;
+  document.getElementById('stockPrice').textContent = fmt(s.price);
+  const up = s.changePct >= 0;
+  const el = document.getElementById('stockChange');
+  el.textContent = `${up ? '▲' : '▼'} ${Math.abs(s.changePct).toFixed(2)}% (${up ? '+' : ''}${fmt(s.changeAmt)})`;
+  el.className = `${up ? 'text-success-DEFAULT' : 'text-destructive-DEFAULT'} font-semibold text-lg`;
+  document.getElementById('stockMeta').textContent =
+    `거래량 ${Math.round(s.volume / 1000).toLocaleString('ko-KR')}K · 당일 ${fmt(s.dayLow)}~${fmt(s.dayHigh)}원 · 52주 ${fmt(s.low52)} ~ ${fmt(s.high52)}원`;
+  document.getElementById('dataTimestamp').textContent = s.marketTime ? `· ${new Date(s.marketTime).toLocaleString('ko-KR')}` : '';
+
+  // Diagram
+  const cur = s.price;
+  document.getElementById('priceDiagram').innerHTML = `
+    ${row('emerald', '🎯 장기 목표가', `${fmt(s.longTarget)}원`, `+${((s.longTarget/cur - 1)*100).toFixed(1)}%`, false)}
+    <div class="flex justify-center"><span class="text-slate-300">▲</span></div>
+    ${row('blue', '🚧 저항선', `${fmt(s.resistance.low)} ~ ${fmt(s.resistance.high)}원`, `+${((s.resistance.high/cur - 1)*100).toFixed(1)}%`, false)}
+    <div class="flex justify-center"><span class="text-slate-300">▲</span></div>
+    ${rowCurrent(s.price)}
+    <div class="flex justify-center"><span class="text-slate-300">▼</span></div>
+    ${row('amber', '🛡️ 지지선', `${fmt(s.support.low)} ~ ${fmt(s.support.high)}원`, `${((s.support.low/cur - 1)*100).toFixed(1)}%`, false)}
+    <div class="flex justify-center"><span class="text-slate-300">▼</span></div>
+    ${row('red', '⛔ 손절선', `${fmt(s.stopLoss)}원`, `${((s.stopLoss/cur - 1)*100).toFixed(1)}%`, false)}
+  `;
+
+  // Comment — 종목·섹터 맞춤 서술
+  document.getElementById('commentBox').innerHTML = buildAnalysisHTML(s);
+
+  // Guide
+  document.getElementById('guideBox').innerHTML = `
+    <li class="flex gap-2">
+      <span class="text-warning-DEFAULT">⚠️</span>
+      <div>현재 지지↔저항 사이 <strong>${s.posPct}%</strong> 지점. ${s.posPct >= 70 ? '고점권 — 추격 매수 주의' : s.posPct <= 30 ? '저점권 — 반등 지켜보기' : '중립권'}.</div>
+    </li>
+    <li class="flex gap-2">
+      <span class="text-success-DEFAULT">🎯</span>
+      <div><strong>단계적 익절</strong>: ${fmt(s.resistance.high)}원 근처에서 일부 실현 권장.</div>
+    </li>
+    <li class="flex gap-2">
+      <span class="text-destructive-DEFAULT">🛑</span>
+      <div><strong>손절 관리</strong>: ${fmt(s.stopLoss)}원 이탈 시 손절 또는 재검토.</div>
+    </li>
+  `;
+
+  // Active alerts summary
+  const rules = state.alertRules[s.code] || defaultRules(s);
+  document.getElementById('activeAlertBox').innerHTML = `
+    ${alertRow('🟢', '매수', rules.buy)}
+    ${alertRow('🔴', '매도', rules.sell)}
+    ${alertRow('⛔', '손절', rules.stopLoss)}
+    ${alertRow('🎯', '목표', rules.target)}
+  `;
+
+  // 52w range
+  const rangePct = ((s.price - s.low52) / (s.high52 - s.low52)) * 100;
+  document.getElementById('range52Box').innerHTML = `
+    <div class="flex justify-between text-slate-500 text-xs mb-1">
+      <span>최저 ${fmt(s.low52)}</span><span>최고 ${fmt(s.high52)}</span>
+    </div>
+    <div class="w-full h-2 bg-slate-100 rounded-full relative">
+      <div class="absolute -top-0.5 w-3 h-3 bg-brand-500 rounded-full border-2 border-white shadow" style="left:calc(${Math.max(0, Math.min(100, rangePct))}% - 6px)"></div>
+    </div>
+    <div class="text-center text-xs text-slate-600 mt-2">현재 <strong>${rangePct.toFixed(0)}%</strong> 위치</div>
+  `;
+
+  // Favorite state
+  updateFavButton();
+
+  // Chart
+  renderChart(s);
+}
+
+function row(color, label, value, delta, current) {
+  const cls = current
+    ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/20'
+    : `bg-${color}-50 border border-${color}-200`;
+  const labelCls = current ? '' : `text-${color}-700`;
+  const valueCls = current ? 'font-bold text-xl' : `font-semibold text-${color}-800`;
+  const deltaCls = current ? 'opacity-90' : `text-${color}-700`;
+  return `
+    <div class="relative flex items-center gap-3 p-3 rounded-lg ${cls}">
+      <span class="text-xs font-bold w-24 ${labelCls}">${label}</span>
+      <span class="flex-1 tabular-nums ${valueCls}">${value}</span>
+      <span class="text-xs tabular-nums ${deltaCls}">${delta}</span>
+    </div>
+  `;
+}
+function rowCurrent(price) {
+  return `
+    <div class="relative flex items-center gap-3 p-4 rounded-lg bg-brand-500 text-white shadow-lg shadow-brand-500/20">
+      <span class="text-xs font-bold w-24">● 현재가</span>
+      <span class="flex-1 tabular-nums font-bold text-xl">${fmt(price)}원</span>
+      <span class="text-xs opacity-90">실시간</span>
+    </div>
+  `;
+}
+function alertRow(emoji, label, rule) {
+  if (!rule?.enabled) return `<div class="flex items-center justify-between p-2 bg-slate-50 rounded-lg opacity-60"><div class="flex items-center gap-2 text-sm"><span>${emoji}</span><span>${label} (${rule ? fmt(rule.price) + '원' : '설정 안 됨'})</span></div><span class="text-xs font-semibold text-slate-500">OFF</span></div>`;
+  const bgMap = { '🟢': 'success', '🔴': 'destructive', '⛔': 'destructive', '🎯': 'warning' };
+  const bg = bgMap[emoji];
+  return `<div class="flex items-center justify-between p-2 bg-${bg}-bg rounded-lg"><div class="flex items-center gap-2 text-sm"><span>${emoji}</span><span>${label} (${fmt(rule.price)}원)</span></div><span class="text-xs font-semibold text-${bg}-DEFAULT">ON</span></div>`;
+}
+
+// ==================== Analysis (종목·섹터 맞춤 서술) ====================
+const SECTOR_TRIGGERS = [
+  { keys: ['반도체', '전자부품', '전자'], theme: 'AI 반도체·HBM 수요 확대, 데이터센터 투자 사이클' },
+  { keys: ['2차전지', '전지', '배터리'], theme: '전기차 수요 회복, 유럽·미국 배터리 소재 수급' },
+  { keys: ['방산', '항공', '무기'], theme: '해외 방산 수주 확대, 지정학적 긴장 지속' },
+  { keys: ['바이오', '제약', '의약'], theme: '신약 임상 성공·FDA 승인, 글로벌 라이센싱 딜' },
+  { keys: ['조선', '선박'], theme: 'LNG·컨테이너선 수주 랠리, 친환경 선박 전환' },
+  { keys: ['자동차', '부품', '차량'], theme: '전기차 판매 확대, 해외 수출 증가' },
+  { keys: ['게임', '엔터테인먼트 소프트'], theme: '신작 흥행, 글로벌·중국 진출' },
+  { keys: ['엔터', '음반', '미디어'], theme: '월드투어·신인 아티스트 데뷔, K-콘텐츠 수출' },
+  { keys: ['화학', '정유', '석유'], theme: '석유화학 스프레드 회복, 원유 수요 사이클' },
+  { keys: ['철강', '비철금속', '금속'], theme: '인프라 투자 확대, 중국 감산 반사이익' },
+  { keys: ['금융', '은행', '증권', '보험'], theme: '금리 정책 변화, NIM 확대·주주환원 강화' },
+  { keys: ['통신'], theme: '5G 가입자 증가, 안정적 배당 매력' },
+  { keys: ['유통', '소매', '백화점', '편의점', '홈쇼핑', '음·식료품'], theme: '소비 회복, 온·오프 옴니 매출 성장' },
+  { keys: ['소프트웨어', 'IT', '정보기술'], theme: 'AI 도입 확산, 클라우드·SaaS 매출 확대' },
+  { keys: ['로봇', 'AI', '인공지능'], theme: '정부 정책·대형 수주, 협동로봇 시장 확대' },
+  { keys: ['전력', '신재생', '에너지', '태양광', '풍력'], theme: '그린 뉴딜, 대형 수주·설비 투자 사이클' },
+  { keys: ['건설', '건축', '토목'], theme: '해외 인프라 수주, 원자재 원가 안정' },
+  { keys: ['기계', '중장비'], theme: '해외 수주 랠리, 리쇼어링 수혜' },
+  { keys: ['식품', '음료'], theme: '해외 진출 확대, K-푸드 트렌드' },
+  { keys: ['화장품', '뷰티', '생활용품'], theme: '중국·미국 뷰티 수출 회복, 신규 브랜드 파워' },
+  { keys: ['지주'], theme: '주요 자회사 실적 재평가, 배당 정책 강화' },
+];
+
+function sectorTheme(sector) {
+  if (!sector) return '실적 개선·시장 재평가';
+  for (const t of SECTOR_TRIGGERS) {
+    for (const k of t.keys) if (sector.includes(k)) return t.theme;
+  }
+  return '실적 개선·시장 재평가';
+}
+
+function upside(price, target) {
+  return ((target / price - 1) * 100);
+}
+
+function buildAnalysisHTML(s) {
+  const cur = s.price;
+  const theme = sectorTheme(s.sector);
+
+  // 각 목표가 구간 산출
+  const t1Low  = s.target1;                           // 저항선 상단 +5%
+  const t1High = Math.round(s.resistance.high * 1.10); // 저항선 +10%
+  const t2Low  = Math.round((s.resistance.high + s.high52) / 2);
+  const t2High = s.high52;
+  const longLow  = Math.round(s.high52 * 1.03);
+  const longHigh = Math.round(s.high52 * 1.30);
+
+  const t1LowPct  = upside(cur, t1Low).toFixed(1);
+  const t1HighPct = upside(cur, t1High).toFixed(1);
+  const t2LowPct  = upside(cur, t2Low).toFixed(1);
+  const t2HighPct = upside(cur, t2High).toFixed(1);
+  const longPct   = upside(cur, longLow).toFixed(1);
+
+  const supDownPct  = upside(cur, s.support.low).toFixed(1);   // 음수
+  const stopDownPct = upside(cur, s.stopLoss).toFixed(1);
+
+  const smallCap = s.volume && s.volume < 500000;
+  const highVol  = Math.abs(s.changePct) >= 3;
+
+  // posPct 기반 상황 조언
+  let stanceLine;
+  if (s.posPct >= 70) {
+    stanceLine = `현재가는 지지↔저항 사이 <strong>${s.posPct}% 지점(고점권)</strong>. 저항선 근처에서는 매물 소화 관찰이 우선이며, 추격 매수보다는 단계적 익절을 고려합니다.`;
+  } else if (s.posPct <= 30) {
+    stanceLine = `현재가는 지지↔저항 사이 <strong>${s.posPct}% 지점(저점권)</strong>. 지지선 유지 확인 후 분할 매수로 접근하는 전략이 적합합니다.`;
+  } else {
+    stanceLine = `현재가는 지지↔저항 사이 <strong>${s.posPct}% 지점(중립권)</strong>. 방향성 확인까지는 관망하거나 소량 분할 접근이 안전합니다.`;
+  }
+
+  // 카드 5개: 1차/2차/장기 목표 · 대응 가이드 · 리스크 관리
+  return `
+    <div class="rounded-xl bg-blue-50/40 border border-blue-100 p-4">
+      <div class="flex items-baseline justify-between gap-2 mb-2">
+        <div class="flex items-center gap-2">
+          <span class="text-blue-700 font-bold">🎯 1차 목표가</span>
+          <span class="text-xs text-blue-600">단기 기술적 반등</span>
+        </div>
+        <span class="tabular-nums font-semibold text-blue-800">${fmt(t1Low)} ~ ${fmt(t1High)}원</span>
+      </div>
+      <div class="text-sm text-slate-700 leading-relaxed">
+        <strong>이유</strong>: 최근 60일 박스권 상단(${fmt(s.resistance.low)}~${fmt(s.resistance.high)}원)에 형성된
+        <strong>단기 매물대 저항선</strong>으로, 반등 시 가장 먼저 부딪히는 구간입니다.
+        <br><strong>상승여력</strong>: 현재가(${fmt(cur)}원) 대비 <strong class="text-blue-700">+${t1LowPct}% ~ +${t1HighPct}%</strong> 수준.
+      </div>
+    </div>
+
+    <div class="rounded-xl bg-indigo-50/40 border border-indigo-100 p-4">
+      <div class="flex items-baseline justify-between gap-2 mb-2">
+        <div class="flex items-center gap-2">
+          <span class="text-indigo-700 font-bold">🎯 2차 목표가</span>
+          <span class="text-xs text-indigo-600">중기 모멘텀 형성 시</span>
+        </div>
+        <span class="tabular-nums font-semibold text-indigo-800">${fmt(t2Low)} ~ ${fmt(t2High)}원</span>
+      </div>
+      <div class="text-sm text-slate-700 leading-relaxed">
+        <strong>이유</strong>: <strong>52주 최고가 ${fmt(s.high52)}원</strong> 부근으로,
+        ${theme} 등 <strong>${s.sector || '해당 섹터'}</strong> 관련 뉴스나
+        분기 실적 개선 기대감이 커질 경우 도전해볼 수 있는 구간입니다.
+        <br><strong>상승여력</strong>: 현재가 대비 <strong class="text-indigo-700">+${t2LowPct}% ~ +${t2HighPct}%</strong>.
+      </div>
+    </div>
+
+    <div class="rounded-xl bg-emerald-50/40 border border-emerald-100 p-4">
+      <div class="flex items-baseline justify-between gap-2 mb-2">
+        <div class="flex items-center gap-2">
+          <span class="text-emerald-700 font-bold">🎯 장기 목표가</span>
+          <span class="text-xs text-emerald-700">사업 체질 개선·턴어라운드</span>
+        </div>
+        <span class="tabular-nums font-semibold text-emerald-800">${fmt(longLow)}원 이상</span>
+      </div>
+      <div class="text-sm text-slate-700 leading-relaxed">
+        <strong>이유</strong>: ${theme} 시나리오가 본격화되어
+        <strong>본업 가치가 재평가(Re-rating)</strong>될 경우 형성 가능한 장기 구간입니다.
+        52주 신고가 갱신과 함께 시장 프리미엄이 부여되는 흐름을 전제로 합니다.
+        <br><strong>상승여력</strong>: 현재가 대비 <strong class="text-emerald-700">+${longPct}%</strong> 이상.
+      </div>
+    </div>
+
+    <div class="rounded-xl bg-slate-50 border border-slate-200 p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-slate-800 font-bold">🧭 대응 가이드</span>
+      </div>
+      <ul class="text-sm text-slate-700 space-y-2 leading-relaxed">
+        <li class="flex gap-2">
+          <span class="text-warning-DEFAULT">⚠️</span>
+          <span><strong>추격 매수 주의</strong>: ${smallCap ? '거래량이 적어 슬리피지가 크고 ' : ''}${highVol ? '오늘 등락폭이 커 ' : ''}변동성이 큽니다. 상승 시 <strong>${fmt(t1Low)}원선 근처에서 일부 익절</strong>하는 단계적 대응이 안전합니다.</span>
+        </li>
+        <li class="flex gap-2">
+          <span class="text-success-DEFAULT">📈</span>
+          <span><strong>매수 관점</strong>: 지지선(${fmt(s.support.low)}~${fmt(s.support.high)}원) 부근에서 <strong>분할 매수</strong>가 유리. 저항선 돌파 확인 후 추가 매수도 대안.</span>
+        </li>
+        <li class="flex gap-2">
+          <span class="text-info-DEFAULT">🎯</span>
+          <span>${stanceLine}</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="rounded-xl bg-red-50/40 border border-red-100 p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-red-700 font-bold">🛑 리스크 관리 (손절선)</span>
+      </div>
+      <div class="text-sm text-slate-700 leading-relaxed">
+        최저점 구간인 <strong>${fmt(s.support.low)}~${fmt(s.support.high)}원 라인</strong>을 이탈할 경우
+        추가 하락 위험이 커집니다. <strong>${fmt(s.stopLoss)}원 이탈 시 손절 또는 재검토</strong>가 필요합니다.
+        <br>
+        <span class="text-xs text-red-700">· 지지선 이탈 폭: ${supDownPct}% · 손절선 이탈 폭: ${stopDownPct}%</span>
+      </div>
+    </div>
+  `;
+}
+
+let priceChart;
+function renderChart(s) {
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  if (priceChart) priceChart.destroy();
+  const labels = s.series.times.map(t => new Date(t).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }));
+  const closes = s.series.closes;
+  const n = closes.length;
+  priceChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '종가', data: closes, borderColor: '#FF7A00', backgroundColor: 'rgba(255,122,0,0.08)', fill: true, tension: 0.25, borderWidth: 2, pointRadius: 0 },
+        { label: '저항선', data: Array(n).fill(s.resistance.high), borderColor: '#2563eb', borderDash: [6,4], borderWidth: 1.5, pointRadius: 0, fill: false },
+        { label: '지지선', data: Array(n).fill(s.support.low), borderColor: '#d97706', borderDash: [6,4], borderWidth: 1.5, pointRadius: 0, fill: false },
+        { label: '손절선', data: Array(n).fill(s.stopLoss), borderColor: '#dc2626', borderDash: [3,3], borderWidth: 1.5, pointRadius: 0, fill: false },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}원` } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 8, color: '#94a3b8' } },
+        y: { grid: { color: '#f1f5f9' }, ticks: { color: '#94a3b8', callback: (v) => fmt(v) } }
+      }
+    }
+  });
+}
+
+async function loadStockNews(code) {
+  const box = document.getElementById('stockNewsBox');
+  box.innerHTML = `<div class="text-center py-3"><span class="spinner"></span></div>`;
+  try {
+    const { items } = await api.stockNews(code);
+    if (!items.length) { box.innerHTML = `<div class="text-slate-400 text-center py-4">뉴스가 없습니다</div>`; return; }
+    box.innerHTML = items.map(n => `
+      <a href="${n.link}" target="_blank" rel="noopener" class="block p-3 rounded-lg hover:bg-slate-50 border border-slate-100">
+        <div class="text-sm font-medium">${n.title}</div>
+        <div class="text-[10px] text-slate-400 mt-1">${n.source} · ${timeAgo(n.pubDate)}</div>
+      </a>
+    `).join('');
+  } catch (e) { box.innerHTML = `<div class="text-destructive-DEFAULT text-center py-4 text-sm">뉴스 로드 실패</div>`; }
+}
+
+// ==================== Watchlist Page ====================
+function renderWatchlistFull() {
+  const tbody = document.getElementById('watchlistTable');
+  const empty = document.getElementById('watchlistEmpty');
+  const statsBox = document.getElementById('watchlistStats');
+  const table = tbody.closest('table').parentElement;
+
+  if (!state.watchlist.length) {
+    empty.classList.remove('hidden');
+    table.classList.add('hidden');
+    statsBox.innerHTML = '';
+    return;
+  }
+  empty.classList.add('hidden');
+  table.classList.remove('hidden');
+
+  const quotes = state.watchlist.map(c => state.quotes[c]).filter(Boolean);
+  const nearSupport = quotes.filter(q => q.price <= q.support.high * 1.02).length;
+  const nearResistance = quotes.filter(q => q.price >= q.resistance.low * 0.98).length;
+  const activeAlerts = Object.values(state.alertRules).filter(r => r.buy?.enabled || r.sell?.enabled || r.stopLoss?.enabled || r.target?.enabled).length;
+
+  statsBox.innerHTML = `
+    <div class="p-4 bg-white border border-slate-200 rounded-xl">
+      <div class="text-xs text-slate-500">전체</div>
+      <div class="text-2xl font-bold tabular-nums mt-1">${state.watchlist.length}</div>
+    </div>
+    <div class="p-4 bg-white border border-slate-200 rounded-xl">
+      <div class="text-xs text-blue-700 font-semibold">🚧 저항 근접</div>
+      <div class="text-2xl font-bold tabular-nums mt-1">${nearResistance}</div>
+    </div>
+    <div class="p-4 bg-white border border-slate-200 rounded-xl">
+      <div class="text-xs text-amber-700 font-semibold">🛡️ 지지 근접</div>
+      <div class="text-2xl font-bold tabular-nums mt-1">${nearSupport}</div>
+    </div>
+    <div class="p-4 bg-white border border-slate-200 rounded-xl">
+      <div class="text-xs text-brand-500 font-semibold">🔔 알림 활성</div>
+      <div class="text-2xl font-bold tabular-nums mt-1">${activeAlerts}</div>
+    </div>
+  `;
+
+  tbody.innerHTML = state.watchlist.map(code => {
+    const q = state.quotes[code];
+    if (!q) return `<tr><td colspan="8" class="p-4"><div class="skeleton h-8 rounded"></div></td></tr>`;
+    const up = q.changePct >= 0;
+    const rules = state.alertRules[q.code] || {};
+    const active = ['buy', 'sell', 'stopLoss', 'target'].filter(k => rules[k]?.enabled).length;
+    return `
+      <tr class="hover:bg-slate-50 cursor-pointer" data-stock="${q.code}">
+        <td class="px-4 py-3">
+          <div class="font-semibold">${q.name}</div>
+          <div class="text-xs text-slate-500">${q.code} · ${q.market}</div>
+        </td>
+        <td class="px-4 py-3 text-right tabular-nums font-semibold">${fmt(q.price)}</td>
+        <td class="px-4 py-3 text-right tabular-nums ${up ? 'text-success-DEFAULT' : 'text-destructive-DEFAULT'} font-semibold">
+          ${up ? '▲' : '▼'} ${Math.abs(q.changePct).toFixed(2)}%
+        </td>
+        <td class="px-4 py-3 text-right tabular-nums text-amber-700">${fmt(q.support.low)}</td>
+        <td class="px-4 py-3 text-right tabular-nums text-blue-700">${fmt(q.resistance.high)}</td>
+        <td class="px-4 py-3">
+          <div class="w-32 h-1.5 bg-slate-100 rounded-full relative">
+            <div class="absolute -top-1 w-3 h-3 bg-brand-500 rounded-full border-2 border-white shadow" style="left:calc(${q.posPct}% - 6px)"></div>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1 tabular-nums">${q.posPct}%</div>
+        </td>
+        <td class="px-4 py-3 text-center">
+          ${active > 0 ? `<span class="inline-flex items-center gap-1 text-brand-500"><span>🔔</span><span class="text-xs">${active}</span></span>` : `<span class="text-slate-300">🔕</span>`}
+        </td>
+        <td class="px-4 py-3 text-right" onclick="event.stopPropagation()">
+          <button class="text-xs text-destructive-DEFAULT hover:underline" onclick="removeFromWatchlist('${q.code}')">해제</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+window.removeFromWatchlist = function(code) {
+  state.watchlist = state.watchlist.filter(c => c !== code);
+  saveWatchlist();
+  renderWatchlistFull();
+  renderMiniGrid();
+  document.getElementById('watchlistNavCount').textContent = state.watchlist.length;
+  showToast('즐겨찾기에서 해제되었습니다');
+}
+
+// ==================== Alerts Page ====================
+function renderAlerts() {
+  const tbody = document.getElementById('alertTable');
+  const empty = document.getElementById('alertEmpty');
+  if (!state.alertHistory.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  const typeColor = { BUY: 'text-success-DEFAULT bg-success-bg', SELL: 'text-destructive-DEFAULT bg-destructive-bg', STOP_LOSS: 'text-red-800 bg-red-50', TARGET: 'text-warning-DEFAULT bg-warning-bg' };
+  tbody.innerHTML = state.alertHistory.map(a => `
+    <tr class="hover:bg-slate-50 cursor-pointer" data-stock="${a.code}">
+      <td class="px-4 py-3 text-slate-500 tabular-nums text-xs">${new Date(a.time).toLocaleString('ko-KR')}</td>
+      <td class="px-4 py-3"><span class="text-xs font-semibold px-2 py-1 rounded ${typeColor[a.type]}">${a.typeLabel}</span></td>
+      <td class="px-4 py-3">
+        <div class="font-medium">${a.name}</div>
+        <div class="text-xs text-slate-400">${a.code}</div>
+      </td>
+      <td class="px-4 py-3 text-right tabular-nums font-semibold">${fmt(a.price)}원</td>
+      <td class="px-4 py-3 text-slate-600">${a.condition}</td>
+      <td class="px-4 py-3 text-center">
+        ${a.read ? '<span class="text-xs text-slate-400">읽음</span>' : '<span class="inline-block w-2 h-2 bg-brand-500 rounded-full"></span>'}
+      </td>
+    </tr>
+  `).join('');
+}
+
+document.getElementById('markAllRead').addEventListener('click', () => {
+  state.alertHistory.forEach(a => a.read = true);
+  saveAlerts();
+  renderAlerts();
+  document.getElementById('alertBadge').classList.add('hidden');
+  showToast('모든 알림을 읽음 처리했습니다');
+});
+document.getElementById('clearOld').addEventListener('click', () => {
+  const cutoff = Date.now() - 30 * 86400000;
+  state.alertHistory = state.alertHistory.filter(a => new Date(a.time).getTime() > cutoff);
+  saveAlerts();
+  renderAlerts();
+  showToast('30일 이전 알림을 정리했습니다');
+});
+
+// ==================== News Page ====================
+async function renderNewsPage() {
+  const box = document.getElementById('newsList');
+  if (!state.watchlist.length) { box.innerHTML = `<div class="text-center py-16 text-slate-500">즐겨찾기 종목을 먼저 등록해주세요</div>`; return; }
+  box.innerHTML = `<div class="text-center py-8"><span class="spinner"></span></div>`;
+  try {
+    const { items } = await api.watchlistNews(state.watchlist);
+    if (!items.length) { box.innerHTML = `<div class="text-center py-16 text-slate-500">최근 뉴스가 없습니다</div>`; return; }
+    box.innerHTML = items.map(n => `
+      <a href="${n.link}" target="_blank" rel="noopener" class="block p-4 bg-white border border-slate-200 rounded-xl hover:border-brand-500">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded">${n.stockName}</span>
+          <span class="text-xs text-slate-400">${n.source}</span>
+          <span class="ml-auto text-xs text-slate-400">${timeAgo(n.pubDate)}</span>
+        </div>
+        <div class="font-medium">${n.title}</div>
+      </a>
+    `).join('');
+  } catch { box.innerHTML = `<div class="text-center py-16 text-destructive-DEFAULT">뉴스 로드 실패</div>`; }
+}
+document.getElementById('refreshNewsBtn').addEventListener('click', renderNewsPage);
+
+// ==================== Hot Keywords Page ====================
+async function renderHotPage() {
+  const grid = document.getElementById('hotGrid');
+  grid.innerHTML = `<div class="col-span-2 text-center py-8"><span class="spinner"></span></div>`;
+  try {
+    const { keywords } = await api.hotKeywords();
+    grid.innerHTML = keywords.map(k => `
+      <div class="bg-white border border-slate-200 rounded-xl p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-2xl">${k.icon}</span>
+          <span class="text-lg font-bold">${k.key}</span>
+        </div>
+        <div class="space-y-1">
+          ${k.headlines.slice(0, 3).map(h => `
+            <a href="${h.link}" target="_blank" rel="noopener" class="block p-2 rounded hover:bg-slate-50">
+              <div class="text-sm">${h.title}</div>
+              <div class="text-[10px] text-slate-400 mt-0.5">${h.source} · ${timeAgo(h.pubDate)}</div>
+            </a>
+          `).join('') || '<div class="text-sm text-slate-400 py-2">뉴스 없음</div>'}
+        </div>
+      </div>
+    `).join('');
+  } catch { grid.innerHTML = `<div class="col-span-2 text-center py-16 text-destructive-DEFAULT">핫 키워드 로드 실패</div>`; }
+}
+
+// ==================== Settings ====================
+function renderSettingsPage() {
+  const tag = document.getElementById('permStatusTag');
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const map = {
+    granted: ['text-success-DEFAULT bg-success-bg', '허용됨'],
+    default: ['text-warning-DEFAULT bg-warning-bg', '미설정'],
+    denied: ['text-destructive-DEFAULT bg-destructive-bg', '차단됨 (브라우저 설정에서 변경)'],
+    unsupported: ['text-slate-500 bg-slate-100', '지원 안함'],
+  };
+  const [cls, label] = map[perm] || map.unsupported;
+  tag.className = 'text-xs px-2 py-1 rounded ' + cls;
+  tag.textContent = label;
+}
+document.getElementById('requestPermBtn').addEventListener('click', async () => {
+  if (!('Notification' in window)) return;
+  await Notification.requestPermission();
+  renderSettingsPage();
+});
+document.getElementById('resetDefaultBtn').addEventListener('click', () => {
+  if (!confirm('즐겨찾기를 기본값(삼성전자·SK하이닉스·NAVER·카카오·LG에너지솔루션)으로 복원할까요?')) return;
+  state.watchlist = [...DEFAULT_WATCHLIST];
+  saveWatchlist();
+  refreshWatchlist().then(renderMiniGrid);
+  showToast('즐겨찾기 기본값 복원 완료');
+});
+document.getElementById('clearAllBtn').addEventListener('click', () => {
+  if (!confirm('정말 모든 데이터를 삭제할까요? (즐겨찾기 + 알림 이력)')) return;
+  localStorage.removeItem(LS_WATCHLIST);
+  localStorage.removeItem(LS_ALERTS);
+  localStorage.removeItem(LS_RULES);
+  localStorage.removeItem(LS_RECENT);
+  loadState();
+  refreshWatchlist().then(renderMiniGrid);
+  renderAlerts();
+  showToast('모든 데이터가 삭제되었습니다');
+});
+
+// ==================== Alert Panel ====================
+const panel = document.getElementById('alertPanel');
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-open-alert-panel]') || e.target.closest('#alertBtn')) {
+    openAlertPanel();
+  }
+  if (e.target.closest('[data-close-alert-panel]')) {
+    panel.classList.add('hidden-panel');
+  }
+  if (e.target.closest('[data-save-alert]')) {
+    saveAlertRules();
+    panel.classList.add('hidden-panel');
+    showToast('알림 조건이 저장되었습니다');
+  }
+});
+
+function openAlertPanel() {
+  const s = state.currentStock;
+  if (!s) return;
+  document.getElementById('panelStockName').textContent = s.name;
+  const rules = state.alertRules[s.code] || defaultRules(s);
+  const rulesForm = document.getElementById('alertRulesForm');
+  rulesForm.innerHTML = `
+    ${ruleForm('buy',      '🟢', '매수 알림', '현재가가 임계선을 <strong>돌파</strong>하면 알림', rules.buy || {},      s.resistance.high, `추천: 저항선 상단 ${fmt(s.resistance.high)}원`)}
+    ${ruleForm('sell',     '🔴', '매도 알림', '현재가가 임계선을 <strong>이탈</strong>하면 알림', rules.sell || {},     s.support.low,     `추천: 지지선 하단 ${fmt(s.support.low)}원`)}
+    ${ruleForm('stopLoss', '⛔', '손절 알림', '규율적 손절선 관리',                                rules.stopLoss || {}, s.stopLoss,        `추천: 손절선 ${fmt(s.stopLoss)}원`)}
+    ${ruleForm('target',   '🎯', '1차 목표 도달', '익절 검토 시점',                                 rules.target || {},   s.target1,         `추천: 1차 목표 ${fmt(s.target1)}원`)}
+  `;
+  panel.classList.remove('hidden-panel');
+}
+
+function ruleForm(key, emoji, title, desc, rule, defaultPrice, hint) {
+  const on = !!rule.enabled;
+  return `
+    <div class="border border-slate-200 rounded-xl p-4 ${on ? '' : 'bg-slate-50'}">
+      <label class="flex items-start justify-between mb-3">
+        <div>
+          <div class="flex items-center gap-2"><span>${emoji}</span><span class="font-semibold">${title}</span></div>
+          <div class="text-xs text-slate-500 mt-1">${desc}</div>
+        </div>
+        <input type="checkbox" data-rule-enable="${key}" ${on ? 'checked' : ''} class="w-11 h-6 mt-1" />
+      </label>
+      <div>
+        <label class="text-xs text-slate-500">임계 가격 (원)</label>
+        <input type="number" data-rule-price="${key}" value="${rule.price ?? defaultPrice}" class="w-full mt-1 px-3 py-2 border border-slate-200 rounded-md tabular-nums" />
+        <div class="text-xs text-slate-400 mt-1">${hint}</div>
+      </div>
+    </div>
+  `;
+}
+
+function saveAlertRules() {
+  const s = state.currentStock;
+  if (!s) return;
+  const rules = state.alertRules[s.code] || {};
+  ['buy', 'sell', 'stopLoss', 'target'].forEach(key => {
+    const enabled = document.querySelector(`[data-rule-enable="${key}"]`)?.checked || false;
+    const price = Number(document.querySelector(`[data-rule-price="${key}"]`)?.value || 0);
+    rules[key] = { enabled, price, lastFiredAt: rules[key]?.lastFiredAt || 0 };
+  });
+  state.alertRules[s.code] = rules;
+  saveRules();
+  renderStockDetail(s); // refresh active alerts summary
+}
+
+// ==================== Favorite toggle ====================
+document.getElementById('favoriteBtn').addEventListener('click', () => {
+  const code = state.currentStockCode;
+  if (!code) return;
+  if (state.watchlist.includes(code)) {
+    state.watchlist = state.watchlist.filter(c => c !== code);
+    showToast('즐겨찾기에서 해제되었습니다');
+  } else {
+    state.watchlist.unshift(code);
+    showToast(`⭐ ${state.currentStock.name} 즐겨찾기 추가`);
+  }
+  saveWatchlist();
+  updateFavButton();
+  document.getElementById('watchlistNavCount').textContent = state.watchlist.length;
+  refreshWatchlist().then(renderMiniGrid);
+});
+function updateFavButton() {
+  const code = state.currentStockCode;
+  const on = state.watchlist.includes(code);
+  document.getElementById('favIcon').textContent = on ? '★' : '☆';
+  document.getElementById('favLabel').textContent = on ? '즐겨찾기 해제' : '즐겨찾기';
+  const btn = document.getElementById('favoriteBtn');
+  btn.classList.toggle('bg-brand-50', on);
+}
+
+// ==================== Sidebar recent ====================
+function renderSidebarRecent() {
+  const box = document.getElementById('recentStocks');
+  if (!state.recentViewed.length) { box.innerHTML = ''; return; }
+  box.innerHTML = state.recentViewed.slice(0, 4).map(code => {
+    const q = state.quotes[code];
+    return `
+      <a href="#" data-stock="${code}" class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-slate-100 text-sm">
+        <span>${q?.name || code}</span>
+        <span class="text-slate-400 text-xs tabular-nums">${q ? fmt(q.price) : ''}</span>
+      </a>
+    `;
+  }).join('');
+}
+
+// ==================== Toast ====================
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(() => t.style.opacity = '0', 2200);
+}
+
+// ==================== Permission banner ====================
+document.getElementById('permAllowBtn')?.addEventListener('click', async () => {
+  await Notification.requestPermission();
+  document.getElementById('alertPermBanner').classList.add('hidden');
+});
+document.getElementById('permDismissBtn')?.addEventListener('click', () => {
+  document.getElementById('alertPermBanner').classList.add('hidden');
+});
+
+// ==================== Refresh button ====================
+document.getElementById('refreshBtn').addEventListener('click', async () => {
+  showToast('실시간 데이터 새로고침 중...');
+  await renderDashboard();
+});
+
+// ==================== Init ====================
+loadState();
+document.getElementById('watchlistNavCount').textContent = state.watchlist.length;
+
+// Auto-refresh watchlist every 60s
+setInterval(() => { refreshWatchlist().then(() => { renderMiniGrid(); renderTodayAlerts(); }); }, 60000);
+
+renderDashboard();
+renderSidebarRecent();
+
+// URL hash routing
+const initial = (location.hash || '#dashboard').slice(1);
+if (['dashboard','search','watchlist','alerts','settings','stock','news','hot'].includes(initial)) {
+  activateView(initial);
+}
+</script>
+</body>
+</html>
